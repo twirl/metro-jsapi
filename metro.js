@@ -16,7 +16,8 @@ ymaps.ready(function () { ymaps.modules.define('createTransportMap', [
         CartesianProjection,
         eventManager,
         Item, Collection,
-        layerStorage, mapTypeStorage, MapType, Map, Rectangle) {
+        layerStorage, mapTypeStorage, MapType, Map,
+        Rectangle) {
 
     var prefix = 'open_transport_0_1_0';
     /**
@@ -105,6 +106,8 @@ ymaps.ready(function () { ymaps.modules.define('createTransportMap', [
             this.stations = new StationCollection(this._schemeView);
             this._map.geoObjects.add(this.stations);
             this.stations.select(this._state.selection);
+
+            this.annotations = new AnnotationCollection(this);
 
             // Event manager added
             this.events = new eventManager();
@@ -574,6 +577,7 @@ ymaps.ready(function () { ymaps.modules.define('createTransportMap', [
         this.code = metadata.labelId;
         this.title = metadata.name;
         this.selected = false;
+        this._annotations = [];
 
         this.events.add('click', function () {
             //toggle select
@@ -600,6 +604,10 @@ ymaps.ready(function () { ymaps.modules.define('createTransportMap', [
          */
         getLabelNode: function () {
             return this._schemeView.getSchemeNode().getElementById('label-' + this.code);
+        },
+
+        getNode: function () {
+            return this._schemeView.getSchemeNode().getElementById('station-' + this.code);
         },
         /**
          * Selects current station.
@@ -686,7 +694,39 @@ ymaps.ready(function () { ymaps.modules.define('createTransportMap', [
                     schemeView.fromClientPixels([bbox.x + bbox.width, bbox.y + bbox.height], zoom),
                     zoom)
             ];
+        },
 
+        getPosition: function () {
+            var bbox = this._getGeoBBox(this.getNode());
+            return [
+                (bbox[0][0] + bbox[1][0]) /2,
+                (bbox[0][1] + bbox[1][1]) /2
+            ];
+        },
+
+        annotate: function (properties, options, dontAddToMap) {
+            var deferred = new vow.Deferred();
+
+            ymaps.modules.require('transportMap.Annotation').spread(function (Annotation) {
+                var annotation = new Annotation (this.getPosition(), properties, options);
+                this._annotations.push(annotation);
+                if (!dontAddToMap) {
+                    this.getMap().geoObjects.add(annotation);
+                }
+                deferred.resolve(annotation);
+            }.bind(this), deferred.reject.bind(deferred));
+
+            return deferred.promise();
+        }
+    });
+
+    function AnnotationCollection (map) {
+        AnnotationCollection.superclass.constructor.call(this);
+        this._map = map;
+    }
+    augment(AnnotationCollection, Collection, {
+        getMap: function () {
+            return this._map;
         }
     });
 
@@ -694,3 +734,34 @@ ymaps.ready(function () { ymaps.modules.define('createTransportMap', [
         return new TransportMap(alias, container, state, options);
     });
 });});
+
+ymaps.ready(function () { ymaps.modules.define('transportMap.Annotation', [
+    'util.extend',
+    'util.augment',
+    'geometry.Point',
+    'Placemark',
+    'layout.storage',
+    'templateLayoutFactory'
+], function (provide, extend, augment, PointGeometry, Placemark, layoutStorage, layoutFactory) {
+    function Annotation (position, properties, options) {
+        Annotation.superclass.constructor.call(
+            this,
+            position,
+            properties,
+            extend({
+                iconLayout: 'transportMap#annotation'
+            }, options)
+        );
+    }
+
+    augment(Annotation, Placemark);
+
+    layoutStorage.add('transportMap#annotation', layoutFactory.createClass(
+        '<ymaps style="position: absolute; left: {{ options.offset.0|default:"20" }}px; top: {{ options.offset.1|default:"-20" }}px"' +
+            '<ymaps class="ymaps-tm-annotation-content">{{ properties.iconContent }}</ymaps>' +
+        '</ymaps>', {
+        }
+    ));
+
+    provide(Annotation);
+})});
